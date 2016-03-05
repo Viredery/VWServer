@@ -1,12 +1,16 @@
 #include <stdio.h>
+#include <stdlib.h>	/*setenv*/
 #include <memory.h>
 #include <string.h>
+#include <fcntl.h>	/*open*/
+#include <unistd.h>	/*access,dup2*/
+#include <sys/stat.h>	/*stat*/
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>	/*htons*/
 #include <arpa/inet.h>	/*inet_aton*/
 #include "rio.h"
-
+extern char **environ;
 struct st_request_info {
 	char *method;
 	char *pathinfo;
@@ -20,9 +24,15 @@ struct st_request_info {
 typedef struct sockaddr SA;
 const int LISTENQ = 1024;	/*内核在拒绝连接请求前应放入队列中等待的未完成连接请求的数量*/
 const int REQUEST_MAX_SIZE = 1024;
+const int FILE_MAX_SIZE = 8192;
+
 int doit(int fd, struct sockaddr_in clientaddr);
 int parse_uri(char *buf, char *filename, char *cgiargs);
+int proc_request(int fd, struct sockaddr_in clientaddr, struct st_request_info request_info);
+int serve_dynamic(int fd, char *filename, char *cgiargs);
+int serve_static(int fd, char *filename);
 char* strlwr(char *str);
+
 int main()
 {
 	int listenfd, optval = 1;
@@ -56,7 +66,7 @@ int main()
 		if ((connectfd = accept(listenfd, (SA *)&clientaddr, &clientaddrlen)) < 0)
 			return -1;/*temporary*/
 		doit(connectfd, clientaddr);
-//		close(connectfd);
+		close(connectfd);
 	}
 	return 0;
 }
@@ -105,8 +115,9 @@ int doit(int fd, struct sockaddr_in clientaddr)
 	strcat(physical_path, pathinfo);
 	request_info.physical_path = physical_path;
 	/*添加log系统*/
-//printf("%s\n%s\n%s\n%s\n%s\n",request_info.method,request_info.pathinfo,request_info.path,request_info.file,request_info.physical_path);
+printf("%s\n%s\n%s\n%s\n%s\n%d\n",request_info.method,request_info.pathinfo,request_info.path,request_info.file,request_info.physical_path,request_info.is_static);
 	/*处理*/
+	proc_request(fd, clientaddr, request_info); 
 }
 int parse_uri(char *uri, char *filename, char *cgiargs)
 {
@@ -122,13 +133,55 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
 		p = index(uri, '?');
 		if(p)
 		{
-			strncpy(cgiargs, p, REQUEST_MAX_SIZE);
+			strncpy(cgiargs, p + 1, REQUEST_MAX_SIZE);
 			*p = '\0';
 		} else {
 			strncpy(cgiargs, "", REQUEST_MAX_SIZE);
 		}
 		strncpy(filename, uri, REQUEST_MAX_SIZE);
 		return 0;
+	}
+}
+int proc_request(int fd, struct sockaddr_in clientaddr, struct st_request_info request_info)
+{
+	struct stat sbuf;
+	if(stat(request_info.physical_path, &sbuf) < 0)
+		return -1;/*文件不存在，失败，temporary*/
+	if(access(request_info.physical_path, R_OK) < 0)
+		return -1;/*没有读权限，失败*/
+	if(request_info.is_static == 1)
+		serve_static(fd, request_info.physical_path);
+	else
+		serve_dynamic(fd, request_info.physical_path, request_info.query);
+}
+int serve_static(int fd, char *filename)
+{
+	char buf[FILE_MAX_SIZE];
+	rio_t rio;
+	int srcfd;
+	if((srcfd = open(filename, O_RDONLY, 0)) < 0)
+		return -1;/*temprory*/
+	rio_readinitb(&rio, srcfd);
+	rio_readnb(&rio, buf, FILE_MAX_SIZE);
+	rio_writen(fd, buf, FILE_MAX_SIZE);
+}
+int serve_dynamic(int fd, char *filename, char *cgiargs)
+{
+	char buf[REQUEST_MAX_SIZE], *emptylist[] = { NULL };
+	sprintf(buf, "HTTP/1.0 200 OK\r\n");
+	rio_writen(fd, buf, REQUEST_MAX_SIZE);
+	sprintf(buf, "Server:Web Server\r\n");
+	rio_writen(fd, buf, REQUEST_MAX_SIZE);
+	/*
+
+		待修改
+
+	*/
+	if(fork() == 0)
+	{
+		setenv("QUERY_STRING", cgiargs, 1);
+		dup2(fd, STDOUT_FILENO);
+		execve(filename, emptylist, environ);
 	}
 }
 char* strlwr(char *str)
