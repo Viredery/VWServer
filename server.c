@@ -40,6 +40,7 @@ void send_error(int fd, int status, char *title, char *text);
 static int send_headers(int fd, int status, char *title, char *mime_type, int length);
 void mime_content_type( const char *name, char *ret );
 int log_file_init();
+void write_log_file(int logfd, struct sockaddr_in clientaddr, char *method, char *uri);
 
 int main()
 {
@@ -114,14 +115,6 @@ int doit(int fd, struct sockaddr_in clientaddr, int logfd)
 	if(strcmp(strlwr(buf), "\r\n") == 0 || strcmp(strlwr(buf), "\n") == 0)
 		send_error(fd, 400, "Bad Request", "Client request empty.");
 	sscanf(buf, "%s %s %s", method, uri, version);
-	/*添加log系统*/
-	char clientlog[FILE_MAX_SIZE];
-	strcat(clientlog, buf);
-	strcat(clientlog, "From ");
-	strcat(clientlog,inet_ntoa(clientaddr.sin_addr));
-	strcat(clientlog, "\n\n");
-	lseek(logfd, 0, SEEK_END);
-	rio_writen(logfd, clientlog, strlen(clientlog));
 
 	if(strcmp(strlwr(method), "get") != 0 && strcmp(strlwr(method), "head") != 0)
 		send_error(fd, 501, "Not Implemented", "That method is not implemented.");
@@ -148,6 +141,8 @@ int doit(int fd, struct sockaddr_in clientaddr, int logfd)
 	strncpy(physical_path, "/home/dingyiran/web_server", REQUEST_MAX_SIZE);
 	strcat(physical_path, pathinfo);
 	request_info.physical_path = physical_path;
+	/*写入日志文件*/
+	write_log_file(logfd, clientaddr, method, uri);
 	/*处理*/
 	proc_request(fd, request_info); 
 }
@@ -177,7 +172,7 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
 int proc_request(int fd, struct st_request_info request_info)
 {
 	struct stat sbuf;
-	if(stat(request_info.physical_path, &sbuf) < 0)
+	if(stat(request_info.physical_path, &sbuf) < 0 || !S_ISREG(sbuf.st_mode))
 		send_error(fd, 404, "Not Found", "Server not found this file." );
 	if(access(request_info.physical_path, R_OK) < 0)
 		send_error(fd, 403, "Forbidden", "Client not read this file.");
@@ -389,4 +384,22 @@ int log_file_init()
 		exit(1);
 	}
 	return fd;
+}
+void write_log_file(int logfd, struct sockaddr_in clientaddr, char *method, char *uri)
+{
+	time_t now;
+	char clientlog[FILE_MAX_SIZE], timebuf[FILE_MAX_SIZE];
+	memset(timebuf, 0, strlen(timebuf));
+	now = time((time_t*) 0);
+	strftime(timebuf, sizeof(timebuf), "%a, %d %b %Y %H:%M:%S GMT: ", gmtime(&now));
+	memset(clientlog, 0, strlen(clientlog));
+	strcat(clientlog, timebuf);
+	strcat(clientlog, inet_ntoa(clientaddr.sin_addr));
+	strcat(clientlog, " ");
+	strcat(clientlog, method);
+	strcat(clientlog, " ");
+	strcat(clientlog, uri);
+	strcat(clientlog, "\n");
+	lseek(logfd, 0, SEEK_END);
+	rio_writen(logfd, clientlog, strlen(clientlog));
 }
