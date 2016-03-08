@@ -10,6 +10,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>	/*htons*/
 #include <arpa/inet.h>	/*inet_aton*/
+#include <sys/epoll.h>
+#include <fcntl.h> /*fcntl*/
 #include "rio.h"
 extern char **environ;
 
@@ -24,13 +26,13 @@ struct st_request_info {
 	char *physical_path;
 };
 typedef struct sockaddr SA;
-const int LISTENQ = 1024;	/*内核在拒绝连接请求前应放入队列中等待的未完成连接请求的数量*/
+const int MAX_EVENTS = 32;	/*内核在拒绝连接请求前应放入队列中等待的未完成连接请求的数量*/
 const int REQUEST_MAX_SIZE = 1024;
 const int FILE_MAX_SIZE = 8192;
 const char SERVER_NAME[] = "Web Server";
 const char LOG_FILE[] = "proxy.log";
 
-int doit(int fd, struct sockaddr_in clientaddr, int logfd);
+int doit(int fd, int logfd);
 int parse_uri(char *buf, char *filename, char *cgiargs);
 int proc_request(int fd, struct st_request_info request_info);
 int serve_dynamic(int fd, char *filename, char *cgiargs);
@@ -40,15 +42,18 @@ void send_error(int fd, int status, char *title, char *text);
 static int send_headers(int fd, int status, char *title, char *mime_type, int length);
 void mime_content_type( const char *name, char *ret );
 int log_file_init();
-void write_log_file(int logfd, struct sockaddr_in clientaddr, char *method, char *uri);
+void write_log_file(int logfd, char *method, char *uri);
+int make_socket_non_blocking(int fd);
 
 int main()
 {
 	/*initialize the log file*/
 	int logfd = log_file_init();
-
+	int epollfd;
 	int listenfd, optval = 1;
 	struct sockaddr_in serveraddr;
+	struct epoll_event event;
+	struct epoll_event *events;
 	if((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0 )
 	{
 		perror("Failed to create server socket");
@@ -80,27 +85,80 @@ int main()
 		perror("Failed to bind the server socket");
 		exit(1);
 	}
-	if(listen(listenfd, LISTENQ) < 0)
+	if(make_socket_non_blocking(listenfd) < 0)
+	{
+		perror("Failed to set non_blocking");
+		exit(1);
+	}
+	if(listen(listenfd, SOMAXCONN) < 0)
 	{
 		perror("Failed to listen on server socket");
 		exit(1);
 	}
+	if((epollfd = epoll_create(MAX_EVENTS + 1)) < 0)
+	{
+		perror("Failed to create epollfd");
+		exit(1);
+	}
+	event.data.fd = listenfd;
+	event.events = EPOLLIN | EPOLLET;
+	if(epoll_ctl(epollfd, EPOLL_CTL_ADD, listenfd, &event) < 0)
+	{
+		perror("Failed to create epollfd");
+		exit(1);
+	}
+	events = calloc(MAX_EVENTS, sizeof(event));
+	
+
 	while(1)
 	{
-		int connectfd;
-		struct sockaddr_in clientaddr;
-		int clientaddrlen = sizeof(clientaddr);
-		if ((connectfd = accept(listenfd, (SA *)&clientaddr, &clientaddrlen)) < 0)
+		int n, i;
+		n = epoll_wait(epollfd, events, MAX_EVENTS, -1);
+		for(i = 0; i != n; i++)
 		{
-			perror("Failed to accept client connection");
-			exit(1);
+			if((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP) || (!(events[i].events & EPOLLIN)))
+			{
+				close(events[i].data.fd); 
+				continue;
+			} else if(events[i].data.fd == listenfd) {
+				while(1)
+				{
+					int connectfd;
+					struct sockaddr_in clientaddr;
+					int clientaddrlen = sizeof(clientaddr);
+					if((connectfd = accept(listenfd, (SA *)&clientaddr, &clientaddrlen)) < 0)
+					{
+						if(errno == EAGAIN || errno == EWOULDBLOCK)
+							/* We have processed all incoming connections. */  
+							break;
+						perror("Failed to accept client connection");
+						break;
+					}
+					if(make_socket_non_blocking(connectfd) < 0)
+					{
+						perror("Failed to set non_blocking");
+						exit(1);
+					}
+					event.data.fd = connectfd;
+					event.events = EPOLLIN | EPOLLET;
+					if(epoll_ctl(epollfd, EPOLL_CTL_ADD, connectfd, &event) < 0)
+					{
+						perror("Failed to create epollfd");
+						exit(1);
+					}
+				}
+			} else {
+				doit(events[i].data.fd, logfd);
+				close(events[i].data.fd);
+			}
+
 		}
-		doit(connectfd, clientaddr, logfd);
-		close(connectfd);
 	}
+	free (events);
+	close(logfd);
 	return 0;
 }
-int doit(int fd, struct sockaddr_in clientaddr, int logfd)
+int doit(int fd, int logfd)
 {
 	int is_static;
 	rio_t rio;
@@ -142,7 +200,7 @@ int doit(int fd, struct sockaddr_in clientaddr, int logfd)
 	strcat(physical_path, pathinfo);
 	request_info.physical_path = physical_path;
 	/*写入日志文件*/
-	write_log_file(logfd, clientaddr, method, uri);
+	write_log_file(logfd, method, uri);
 	/*处理*/
 	proc_request(fd, request_info); 
 }
@@ -268,13 +326,13 @@ static int send_headers(int fd, int status, char *title, char *mime_type, int le
 	sprintf(buf, "Server: %s\r\n", SERVER_NAME);
 	rio_writen(fd, buf, strlen(buf));
 
-	if (mime_type != (char*)0)
+	if(mime_type != (char*)0)
 	{
 		memset(buf, 0, strlen(buf));
 		sprintf(buf, "Content-Type: %s\r\n", mime_type);
 		rio_writen(fd, buf, strlen(buf));
 	}
-	if (length >= 0)
+	if(length >= 0)
 	{
 		memset(buf, 0, strlen(buf));
 		sprintf(buf, "Content-Length: %d\r\n", length);        
@@ -385,7 +443,7 @@ int log_file_init()
 	}
 	return fd;
 }
-void write_log_file(int logfd, struct sockaddr_in clientaddr, char *method, char *uri)
+void write_log_file(int logfd, char *method, char *uri)
 {
 	time_t now;
 	char clientlog[FILE_MAX_SIZE], timebuf[FILE_MAX_SIZE];
@@ -394,12 +452,22 @@ void write_log_file(int logfd, struct sockaddr_in clientaddr, char *method, char
 	strftime(timebuf, sizeof(timebuf), "%a, %d %b %Y %H:%M:%S GMT: ", gmtime(&now));
 	memset(clientlog, 0, strlen(clientlog));
 	strcat(clientlog, timebuf);
-	strcat(clientlog, inet_ntoa(clientaddr.sin_addr));
-	strcat(clientlog, " ");
 	strcat(clientlog, method);
 	strcat(clientlog, " ");
 	strcat(clientlog, uri);
 	strcat(clientlog, "\n");
 	lseek(logfd, 0, SEEK_END);
 	rio_writen(logfd, clientlog, strlen(clientlog));
+}
+
+int make_socket_non_blocking(int fd)
+{
+	int flags, s;
+  
+	if((flags = fcntl(fd, F_GETFL, 0)) == -1) 
+		return -1;
+	flags |= O_NONBLOCK;
+	if(fcntl(fd, F_SETFL, flags) == -1) 
+		return -1;
+	return 0;
 }
