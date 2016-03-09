@@ -156,6 +156,7 @@ int main()
 	}
 	free (events);
 	close(logfd);
+	close(listenfd);
 	return 0;
 }
 int doit(int fd, int logfd)
@@ -170,39 +171,43 @@ int doit(int fd, int logfd)
 	rio_readinitb(&rio, fd); 
 	if (rio_readlineb(&rio, buf, REQUEST_MAX_SIZE) < 0)
 		send_error(fd, 500, "Internal Server Error", "Client request not success.");
-	if(strcmp(strlwr(buf), "\r\n") == 0 || strcmp(strlwr(buf), "\n") == 0)
+	else if(strcmp(strlwr(buf), "\r\n") == 0 || strcmp(strlwr(buf), "\n") == 0)
 		send_error(fd, 400, "Bad Request", "Client request empty.");
-	sscanf(buf, "%s %s %s", method, uri, version);
+	else {
+		sscanf(buf, "%s %s %s", method, uri, version);
 
-	if(strcmp(strlwr(method), "get") != 0 && strcmp(strlwr(method), "head") != 0)
-		send_error(fd, 501, "Not Implemented", "That method is not implemented.");
-	/*ignore header*/
-	while(strcmp(buf, "\r\n"))
-		rio_readlineb(&rio, buf, REQUEST_MAX_SIZE);
-	/*parse*/
-	is_static = parse_uri(uri, pathinfo, cgiargs);
-	/*set request_info*/
-	request_info.method = method;
-	request_info.pathinfo = pathinfo;
-	request_info.is_static = is_static;
-	request_info.query = cgiargs;
-	request_info.protocal = version;
-	char *posptr = strrchr(pathinfo, '/');
-	strncpy(path, pathinfo, posptr - pathinfo + 1);
-	path[posptr - pathinfo + 1] = '\0';
-	strncpy(file, posptr + 1, REQUEST_MAX_SIZE);
-	request_info.path = path;
-	request_info.file = file;
-	/*
-		假设127.0.0.1：8000的文件都放在/home/dingyiran/web_server
-	*/
-	strncpy(physical_path, "/home/dingyiran/web_server", REQUEST_MAX_SIZE);
-	strcat(physical_path, pathinfo);
-	request_info.physical_path = physical_path;
-	/*写入日志文件*/
-	write_log_file(logfd, method, uri);
-	/*处理*/
-	proc_request(fd, request_info); 
+		if(strcmp(strlwr(method), "get") != 0 && strcmp(strlwr(method), "head") != 0)
+			send_error(fd, 501, "Not Implemented", "That method is not implemented.");
+		else {
+			/*ignore header*/
+			while(strcmp(buf, "\r\n"))
+				rio_readlineb(&rio, buf, REQUEST_MAX_SIZE);
+			/*parse*/
+			is_static = parse_uri(uri, pathinfo, cgiargs);
+			/*set request_info*/
+			request_info.method = method;
+			request_info.pathinfo = pathinfo;
+			request_info.is_static = is_static;
+			request_info.query = cgiargs;
+			request_info.protocal = version;
+			char *posptr = strrchr(pathinfo, '/');
+			strncpy(path, pathinfo, posptr - pathinfo + 1);
+			path[posptr - pathinfo + 1] = '\0';
+			strncpy(file, posptr + 1, REQUEST_MAX_SIZE);
+			request_info.path = path;
+			request_info.file = file;
+			/*
+				假设127.0.0.1：8000的文件都放在/home/dingyiran/web_server
+			*/
+			strncpy(physical_path, "/home/dingyiran/web_server", REQUEST_MAX_SIZE);
+			strcat(physical_path, pathinfo);
+			request_info.physical_path = physical_path;
+			/*写入日志文件*/
+			write_log_file(logfd, method, uri);
+			/*处理*/
+			proc_request(fd, request_info);
+		} 
+	}
 }
 int parse_uri(char *uri, char *filename, char *cgiargs)
 {
@@ -232,9 +237,9 @@ int proc_request(int fd, struct st_request_info request_info)
 	struct stat sbuf;
 	if(stat(request_info.physical_path, &sbuf) < 0 || !S_ISREG(sbuf.st_mode))
 		send_error(fd, 404, "Not Found", "Server not found this file." );
-	if(access(request_info.physical_path, R_OK) < 0)
+	else if(access(request_info.physical_path, R_OK) < 0)
 		send_error(fd, 403, "Forbidden", "Client not read this file.");
-	if(request_info.is_static == 1)
+	else if(request_info.is_static == 1)
 		serve_static(fd, request_info.physical_path, sbuf.st_size);
 	else
 		serve_dynamic(fd, request_info.physical_path, request_info.query);
@@ -247,15 +252,16 @@ int serve_static(int fd, char *filename, int file_size)
 
 	if((srcfd = open(filename, O_RDONLY, 0)) < 0)
 		send_error(fd, 403, "Forbidden", "Client not read this file.");
-
-	memset(ret, 0, strlen(ret));
-	mime_content_type(filename, ret);
-	send_headers(fd, 200, "OK", ret, file_size);
-	memset(content, 0, strlen(content));
-	rio_readinitb(&rio, srcfd);
-	rio_read(&rio, content, FILE_MAX_SIZE);
-	write(fd, content, strlen(content));
-	close(srcfd);
+	else {
+		memset(ret, 0, strlen(ret));
+		mime_content_type(filename, ret);
+		send_headers(fd, 200, "OK", ret, file_size);
+		memset(content, 0, strlen(content));
+		rio_readinitb(&rio, srcfd);
+		rio_read(&rio, content, FILE_MAX_SIZE);
+		write(fd, content, strlen(content));
+		close(srcfd);
+	}
 }
 int serve_dynamic(int fd, char *filename, char *cgiargs)
 {
@@ -264,11 +270,6 @@ int serve_dynamic(int fd, char *filename, char *cgiargs)
 	rio_writen(fd, buf, strlen(buf));
 	sprintf(buf, "Server:SERVER_NAME\r\n");
 	rio_writen(fd, buf, strlen(buf));
-	/*
-
-		待修改
-
-	*/
 	if(fork() == 0)
 	{
 		setenv("QUERY_STRING", cgiargs, 1);
@@ -311,7 +312,6 @@ void send_error(int fd, int status, char *title, char *text)
 
 	/* Write client socket */
 	rio_writen(fd, buf_all, strlen(buf_all));
-	exit(1);
 }
 static int send_headers(int fd, int status, char *title, char *mime_type, int length)
 {
