@@ -12,7 +12,12 @@
 #include <arpa/inet.h>	/*inet_aton*/
 #include <sys/epoll.h>
 #include <fcntl.h> /*fcntl*/
+#include <pthread.h>
+#include <semaphore.h>
+#include <signal.h>
 #include "rio.h"
+
+#define THREAD_MAX 100
 extern char **environ;
 
 struct st_request_info {
@@ -31,6 +36,13 @@ const int REQUEST_MAX_SIZE = 1024;
 const int FILE_MAX_SIZE = 8192;
 const char SERVER_NAME[] = "Web Server";
 const char LOG_FILE[] = "proxy.log";
+sem_t log_mutex;
+pthread_t pool_tid[THREAD_MAX];//线程ID
+int pool_thread_para[THREAD_MAX][8];//线程参数
+pthread_mutex_t pool_mutex[THREAD_MAX];//线程锁
+int thread_pool_init();
+void *thread_func(int *thread_parameter);
+
 
 int doit(int fd, int logfd);
 int parse_uri(char *buf, char *filename, char *cgiargs);
@@ -45,22 +57,38 @@ int log_file_init();
 void write_log_file(int logfd, char *method, char *uri);
 int make_socket_non_blocking(int fd);
 
+
 int main()
 {
-	/*initialize the log file*/
-	int logfd = log_file_init();
 	int epollfd;
 	int listenfd, optval = 1;
 	struct sockaddr_in serveraddr;
 	struct epoll_event event;
 	struct epoll_event *events;
+
+//	signal(SIGINT, server_stop);
+
+	/*initialize the log file*/
+	int logfd;
+	if((logfd = log_file_init()) < 0)
+	{
+		perror("Server does not found log file");
+		exit(1);
+	}
+	/*initialize the thread pool*/
+	if(thread_pool_init() < 0)
+	{
+		perror("Failed to create thread pool");
+		exit(1);
+	}
+
 	if((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0 )
 	{
 		perror("Failed to create server socket");
 		exit(1);
 	}
 
-	/*允许套接口和一个已在使用中的地址捆绑*/
+	/*允许套接口和一个已在使用中的地址捆绑，服务器快速重启*/
 	if(setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval, sizeof(int)) < 0)
 	{
 		perror("Failed to set SO_REUSEADDR");
@@ -112,7 +140,7 @@ int main()
 
 	while(1)
 	{
-		int n, i;
+		int n, i, j;
 		n = epoll_wait(epollfd, events, MAX_EVENTS, -1);
 		for(i = 0; i != n; i++)
 		{
@@ -148,13 +176,27 @@ int main()
 					}
 				}
 			} else {
-				doit(events[i].data.fd, logfd);
-				close(events[i].data.fd);
+				/*查询空闲线程*/
+				for(j = 0; j < THREAD_MAX; j++)
+				{
+					if(pool_thread_para[j][0] == 0) break; 
+				}
+				if(j >= THREAD_MAX)
+				{
+					send_error(events[i].data.fd, 503, "Service Unavailable", "Server has no usable threads.");
+					continue; 
+				}
+				/*复制有关参数*/
+				pool_thread_para[j][0] = 1;//设置活动标志为"活动"
+				pool_thread_para[j][1] = events[i].data.fd;//客户端连接
+				pool_thread_para[j][2] = logfd;
+				/*线程解锁*/
+				pthread_mutex_unlock(pool_mutex + j); 
 			}
 
 		}
 	}
-	free (events);
+	free(events);
 	close(logfd);
 	close(listenfd);
 	return 0;
@@ -312,6 +354,7 @@ void send_error(int fd, int status, char *title, char *text)
 
 	/* Write client socket */
 	rio_writen(fd, buf_all, strlen(buf_all));
+	close(fd);
 }
 static int send_headers(int fd, int status, char *title, char *mime_type, int length)
 {
@@ -437,10 +480,9 @@ int log_file_init()
 {
 	int fd;
 	if((fd = open(LOG_FILE, O_WRONLY, O_APPEND)) < 0)
-	{
-		perror("Server does not found log file");
-		exit(1);
-	}
+		return -1;
+	if(sem_init(&log_mutex, 0, 1) < 0)
+		return -1;
 	return fd;
 }
 void write_log_file(int logfd, char *method, char *uri)
@@ -456,8 +498,10 @@ void write_log_file(int logfd, char *method, char *uri)
 	strcat(clientlog, " ");
 	strcat(clientlog, uri);
 	strcat(clientlog, "\n");
+	sem_wait(&log_mutex);
 	lseek(logfd, 0, SEEK_END);
 	rio_writen(logfd, clientlog, strlen(clientlog));
+	sem_post(&log_mutex);
 }
 
 int make_socket_non_blocking(int fd)
@@ -470,4 +514,33 @@ int make_socket_non_blocking(int fd)
 	if(fcntl(fd, F_SETFL, flags) == -1) 
 		return -1;
 	return 0;
+}
+int thread_pool_init()
+{
+	int i;
+	for(i = 0; i != THREAD_MAX; i++)
+	{
+		pool_thread_para[i][0] = 0;//表示空闲
+		pool_thread_para[i][7] = i;//线程池索引
+		pthread_mutex_lock(pool_mutex + i);
+	}
+	for(i = 0; i != THREAD_MAX; i++)
+		if(pthread_create(pool_tid + i, NULL, (void* (*)(void *))thread_func, (void *)pool_thread_para[i]) != 0)
+			return -1;
+	return 0;
+}
+void *thread_func(int *thread_parameter)
+{
+	int pool_index = thread_parameter[7];
+	pthread_detach(pthread_self());
+	while(1)
+	{
+		pthread_mutex_lock(pool_mutex + pool_index);
+		int connectfd = thread_parameter[1];
+
+		doit(connectfd, thread_parameter[2]);
+		close(connectfd);
+		thread_parameter[0] = 0;
+	}
+	return NULL;
 }
