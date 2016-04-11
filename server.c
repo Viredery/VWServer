@@ -15,7 +15,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <signal.h>
-#include "rio.h"
+#include "rio_web.h"
 
 #define THREAD_MAX 100
 extern char **environ;
@@ -217,13 +217,13 @@ int doit(int fd, int logfd)
 		send_error(fd, 400, "Bad Request", "Client request empty.");
 	else {
 		sscanf(buf, "%s %s %s", method, uri, version);
-
 		if(strcmp(strlwr(method), "get") != 0 && strcmp(strlwr(method), "head") != 0)
 			send_error(fd, 501, "Not Implemented", "That method is not implemented.");
 		else {
 			/*ignore header*/
-			while(strcmp(buf, "\r\n"))
+			while(strcmp(buf, "\r\n")){
 				rio_readlineb(&rio, buf, REQUEST_MAX_SIZE);
+			}
 			/*parse*/
 			is_static = parse_uri(uri, pathinfo, cgiargs);
 			/*set request_info*/
