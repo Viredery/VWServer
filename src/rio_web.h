@@ -8,7 +8,7 @@
 
 #include <unistd.h>
 #include <memory.h>
-#include <errno.h>
+#include <cerrno>
 #define RIO_BUFSIZE 8192
 
 typedef struct {
