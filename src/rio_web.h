@@ -11,12 +11,13 @@
 #include <cerrno>
 #define RIO_BUFSIZE 8192
 
-typedef struct {
-	int rio_fd;
-	int rio_cnt;
-	char *rio_bufptr;
-	char rio_buf[RIO_BUFSIZE];
-} rio_t;
+class rio_t {
+public:
+    int rio_fd;
+    int rio_cnt;
+    char *rio_bufptr;
+    char rio_buf[RIO_BUFSIZE];
+};
 
 ssize_t rio_read(rio_t *rp, void *usrbuf, size_t n);
 
