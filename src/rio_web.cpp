@@ -6,7 +6,7 @@ ssize_t rio_writen(int fd, void *usrbuf, size_t n)
 {
 	size_t nleft = n;
 	ssize_t nwritten;
-	char *bufp = usrbuf;
+	char *bufp = static_cast<char *>(usrbuf);
 
 	while(nleft > 0)
 	{
@@ -65,7 +65,7 @@ ssize_t rio_read(rio_t *rp, void *usrbuf, size_t n)
 ssize_t rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen)
 {
 	int n, rc;
-	char c, *bufp = usrbuf;
+	char c, *bufp = static_cast<char *>(usrbuf);
 
 	for(n = 1; n < maxlen; n++)
 	{
@@ -92,7 +92,7 @@ ssize_t rio_readnb(rio_t *rp, void *usrbuf, size_t n)
 {
 	ssize_t nleft = n;
 	ssize_t nread;
-	char *bufp = usrbuf;
+	char *bufp = static_cast<char *>(usrbuf);
 	while(nleft > 0) 
 	{
 		if((nread = rio_read(rp, bufp, nleft)) < 0)
