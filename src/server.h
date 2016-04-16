@@ -5,7 +5,7 @@
 #include <sys/epoll.h>
 class Server {
 public:
-    Server();
+    Server(int thread_amount);
     ~Server();
     void server_error_info(std::string s);
 private:

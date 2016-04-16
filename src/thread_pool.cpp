@@ -2,15 +2,6 @@
 #include <algorithm>
 using namespace std;
 
-Task::Task() {
-}
-
-Task::~Task() {
-}
-
-void Task::run() {
-}
-
 Thread_pool *Thread_pool::singleton = NULL;
 
 list<pthread_t> Thread_pool::busy_threads;

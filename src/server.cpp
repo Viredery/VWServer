@@ -1,4 +1,5 @@
 #include "server.h"
+#include "thread_pool.h"
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -12,9 +13,12 @@
 using namespace std;
 
 
-Server::Server() {
+Server::Server(int thread_amount) {
     start_server();
     init_epoll();
+    if(thread_amount < 1)
+        server_error_info("Failed to initialize the thread pool.");
+    Thread_pool::get_thread_pool(thread_amount);
 }
 
 Server::~Server() {
@@ -87,6 +91,7 @@ void Server::run() {
 		        if(errno == EAGAIN || errno == EWOULDBLOCK)
 			    //all incomint connections have been processed
 			    break;
+			//should better change this function[not function in stdio.h]
 			perror("Failed to accept client connection");
 			break;
 		    }
@@ -101,6 +106,8 @@ void Server::run() {
 		}
 	    } else {
 	        //deal with client requests
+		Task *task = new Task(events[i].data.fd);
+		Thread_pool::get_thread_pool()->add_task(task);
 	    }
 	}
     }

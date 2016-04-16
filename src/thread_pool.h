@@ -1,16 +1,10 @@
 #ifndef _THREAD_POOL_H
 #define _THREAD_POOL_H
 
+#include "task.h"
 #include <pthread.h>
 #include <list>
 #include <queue>
-
-class Task {
-public:
-    Task();
-    ~Task();
-    void run();
-};
 
 class Thread_pool
 {
