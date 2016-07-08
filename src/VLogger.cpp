@@ -10,13 +10,11 @@
 #include <unistd.h>
 #include <cstring>
 
-#include <iostream>
 
 namespace VWServer
 {
 
-
-VLogger *VLogger::singleton = new VLogger;
+VLogger *VLogger::singleton = new VLogger();
 
 VLogger::VLogger()
     : FILEPATH_MAX(200), LOG_FILE_NAME("log_{date}_{mark}.txt") {
@@ -60,6 +58,8 @@ void VLogger::initialize() {
         logSizeAmount += statbuf.st_size;
         time_t mtime = statbuf.st_mtime;
         std::string fileName(log_dir + "/" + entry->d_name);
+        //向std::map中插入重复的键时会忽略这条插入信息
+        //因此，如果两个文件的最后修改时间是一样的，则std::map中只插入了第一个文件的信息
         fileMap.insert(make_pair(mtime, fileName));
     }
     //回到之前的工作目录下
