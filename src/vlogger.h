@@ -1,7 +1,7 @@
 #pragma once
 
-#ifndef VLOGGER_H
-#define VLOGRER_H
+#ifndef _VLOGGER_H
+#define _VLOGRER_H
 
 #include <string>
 #include <list> 
