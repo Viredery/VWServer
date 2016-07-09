@@ -1,3 +1,5 @@
+#pragma once
+
 #ifndef _THREAD_POOL_H
 #define _THREAD_POOL_H
 
@@ -6,25 +8,47 @@
 #include <list>
 #include <queue>
 
-class Thread_pool
+namespace VWServer
+{
+
+class ThreadPool
 {
 public:
-    static Thread_pool *get_thread_pool(int n = 0);
-    ~Thread_pool();
-    void add_task(Task *t);
+    /**
+     * Singleton pattern
+     * 使用者需要保证第一次调用时处于单线程环境下
+     */
+    static ThreadPool *getThreadPool(int n = 0);
+    /**
+     *  添加任务到线程池
+     *  Task类中有一个run()方法
+     */
+    void addTask(Task *t);
 private:
-    void create_pool();
-    static Thread_pool *singleton;
-    Thread_pool(int n = 0);
-    static void *thread_call(void *data);
-    static void busy2idle(pthread_t pid);
-    static void idle2busy(pthread_t pid);
-    static pthread_mutex_t task_mutex;
-    static pthread_cond_t task_cond;
-    static pthread_mutex_t thread_move_mutex;
-    int thread_num;
-    static std::list<pthread_t> busy_threads;
-    static std::list<pthread_t> idle_threads;
-    static std::queue<Task *> task_queue;
+    ThreadPool(int n = 0);
+    ~ThreadPool();
+    void createPool();
+
+    static void *threadCall(void *data);
+    void runThread();
+    void busy2Idle(pthread_t pid);
+    void idle2Busy(pthread_t pid);
+
+    static ThreadPool *singleton;
+
+    pthread_mutex_t taskMutex;
+    pthread_cond_t taskCond;
+    pthread_mutex_t threadMoveMutex;
+    //线程池中的线程数量
+    int threadNum;
+    //维护非空闲线程的链表
+    std::list<pthread_t> busyThreads;
+    //维护空闲线程的链表
+    std::list<pthread_t> idleThreads;
+    //任务队列
+    std::queue<Task *> taskQueue;
 };
+
+}
+
 #endif

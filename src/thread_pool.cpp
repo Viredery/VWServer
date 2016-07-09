@@ -1,78 +1,91 @@
 #include "thread_pool.h"
 #include <algorithm>
-using namespace std;
 
-Thread_pool *Thread_pool::singleton = NULL;
+namespace VWServer
+{
 
-list<pthread_t> Thread_pool::busy_threads;
-list<pthread_t> Thread_pool::idle_threads;
-queue<Task *> Thread_pool::task_queue;
+ThreadPool *ThreadPool::singleton = NULL;
 
-pthread_mutex_t Thread_pool::task_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t Thread_pool::thread_move_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t Thread_pool::task_cond = PTHREAD_COND_INITIALIZER;
-
-Thread_pool *Thread_pool::get_thread_pool(int n) {
+ThreadPool *ThreadPool::getThreadPool(int n) {
     if(singleton == NULL && n != 0)
-        singleton = new Thread_pool(n);
+        singleton = new ThreadPool(n);
     return singleton;
 }
 
-Thread_pool::Thread_pool(int n) {
-    thread_num = n;
-    create_pool();
+ThreadPool::ThreadPool(int n) {
+    pthread_mutex_init(&taskMutex, NULL);
+    pthread_mutex_init(&threadMoveMutex, NULL);
+    pthread_cond_init(&taskCond, NULL);
+    threadNum = n;
+    createPool();
 }
 
-Thread_pool::~Thread_pool() {
-    delete singleton;
+ThreadPool::~ThreadPool() {
+    pthread_mutex_destroy(&taskMutex);
+    pthread_mutex_destroy(&threadMoveMutex);
+    pthread_cond_destroy(&taskCond);
+    if (NULL != singleton)
+        delete singleton;
 }
 
-void Thread_pool::create_pool() {
+void ThreadPool::createPool() {
     int i;
-    for(i = 0; i != thread_num; i++) {
+    for(i = 0; i != threadNum; i++) {
         pthread_t tid;
-	if(pthread_create(&tid, NULL, thread_call, NULL) != 0)
-	    throw -1;
-	idle_threads.push_back(tid);
+        if(pthread_create(&tid, NULL, threadCall, this) != 0)
+            throw -1;
+	    idleThreads.push_back(tid);
     }
 }
 
-void *Thread_pool::thread_call(void *data) {
-    pthread_t sef_pid = pthread_self();
+void *ThreadPool::threadCall(void *data) {
+    ThreadPool *ptrThreadPool = static_cast<ThreadPool *>(data);
+    if (NULL != ptrThreadPool) {
+        ptrThreadPool->runThread();
+    }
+    return NULL;
+}
+
+void ThreadPool::runThread() {
+    pthread_t sefPid = pthread_self();
     while(true) {
-        pthread_mutex_lock(&task_mutex);
-        while(task_queue.empty())
-            pthread_cond_wait(&task_cond, &task_mutex);
-        Task *task = task_queue.front();
-	task_queue.pop();
-	pthread_mutex_unlock(&task_mutex);
-	
-	pthread_mutex_lock(&thread_move_mutex);
-	idle2busy(sef_pid);
-	pthread_mutex_unlock(&thread_move_mutex);
+        pthread_mutex_lock(&taskMutex);
+        while(taskQueue.empty())
+            pthread_cond_wait(&taskCond, &taskMutex);
+        Task *task = taskQueue.front();
+        taskQueue.pop();
+        pthread_mutex_unlock(&taskMutex);
+    
+        pthread_mutex_lock(&threadMoveMutex);
+        idle2Busy(sefPid);
+        pthread_mutex_unlock(&threadMoveMutex);
+    
         //run the task
         task->run();
-	pthread_mutex_lock(&thread_move_mutex);
-	busy2idle(sef_pid);
-	pthread_mutex_unlock(&thread_move_mutex);
+    
+        pthread_mutex_lock(&threadMoveMutex);
+        busy2Idle(sefPid);
+        pthread_mutex_unlock(&threadMoveMutex);
     }
 }
 
-void Thread_pool::busy2idle(pthread_t pid) {
-    list<pthread_t>::iterator aim_p = find(busy_threads.begin(), busy_threads.end(), pid);
-    busy_threads.erase(aim_p);
-    idle_threads.push_back(pid);
+void ThreadPool::busy2Idle(pthread_t pid) {
+    std::list<pthread_t>::iterator iterAim = std::find(busyThreads.begin(), busyThreads.end(), pid);
+    busyThreads.erase(iterAim);
+    idleThreads.push_back(pid);
 }
 
-void Thread_pool::idle2busy(pthread_t pid) {
-    list<pthread_t>::iterator aim_p = find(idle_threads.begin(), idle_threads.end(), pid);
-    idle_threads.erase(aim_p);
-    busy_threads.push_back(pid);
+void ThreadPool::idle2Busy(pthread_t pid) {
+    std::list<pthread_t>::iterator iterAim = std::find(idleThreads.begin(), idleThreads.end(), pid);
+    idleThreads.erase(iterAim);
+    busyThreads.push_back(pid);
 }
 
-void Thread_pool::add_task(Task *t) {
-    pthread_mutex_lock(&task_mutex);
-    task_queue.push(t);
-    pthread_mutex_unlock(&task_mutex);
-    pthread_cond_signal(&task_cond);
+void ThreadPool::addTask(Task *t) {
+    pthread_mutex_lock(&taskMutex);
+    taskQueue.push(t);
+    pthread_mutex_unlock(&taskMutex);
+    pthread_cond_signal(&taskCond);
+}
+
 }

@@ -13,7 +13,10 @@ namespace VWServer
 class VLogger
 {
 public:
-    //Singleton pattern
+    /**
+     * Singleton pattern
+     * 使用者需要保证第一次调用时处于单线程环境下
+     */
     static VLogger* getInstance();
     void info(std::string x);
     void warn(std::string x);

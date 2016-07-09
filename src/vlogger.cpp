@@ -14,7 +14,7 @@
 namespace VWServer
 {
 
-VLogger *VLogger::singleton = new VLogger();
+VLogger* VLogger::singleton = NULL;
 
 VLogger::VLogger()
     : FILEPATH_MAX(200), LOG_FILE_NAME("log_{date}_{mark}.txt") {
@@ -31,9 +31,13 @@ VLogger::VLogger()
 
 VLogger::~VLogger() {
     pthread_mutex_destroy(&write_mutex);
+    if (NULL != singleton)
+        delete singleton;
 }
 
 VLogger* VLogger::getInstance() {
+    if (NULL == singleton)
+        singleton = new VLogger();
     return singleton;
 }
 
@@ -176,3 +180,4 @@ void VLogger::controlLogSystemSize(std::string path) {
 
 
 }  // namespace VWServer
+int main(){}
