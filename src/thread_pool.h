@@ -41,7 +41,7 @@ private:
     pthread_mutex_t threadMoveMutex;
     //线程池中的线程数量
     int threadNum;
-    //维护非空闲线程的链表
+    //维护工作线程的链表
     std::list<pthread_t> busyThreads;
     //维护空闲线程的链表
     std::list<pthread_t> idleThreads;

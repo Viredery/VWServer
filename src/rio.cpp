@@ -5,7 +5,7 @@
 
 namespace VWServer {
 
-ssize_t RIO::writen(int fd, void *usrbuf, size_t n)
+ssize_t Rio::writen(int fd, void *usrbuf, size_t n)
 {
     size_t nleft = n;
     ssize_t nwritten;
@@ -24,14 +24,14 @@ ssize_t RIO::writen(int fd, void *usrbuf, size_t n)
     return n;
 }
 
-void RIO::readinitb(rio_t *rp, int fd)
+void Rio::readinitb(rio_t *rp, int fd)
 {
     rp->rio_fd = fd;
     rp->rio_cnt = 0;
     rp->rio_bufptr = rp->rio_buf;
 }
 
-ssize_t RIO::readlineb(rio_t *rp, void *usrbuf, size_t maxlen)
+ssize_t Rio::readlineb(rio_t *rp, void *usrbuf, size_t maxlen)
 {
     int n, rc;
     char c, *bufp = static_cast<char *>(usrbuf);
@@ -53,7 +53,7 @@ ssize_t RIO::readlineb(rio_t *rp, void *usrbuf, size_t maxlen)
     return n;
 }
 
-ssize_t RIO::readnb(rio_t *rp, void *usrbuf, size_t n)
+ssize_t Rio::readnb(rio_t *rp, void *usrbuf, size_t n)
 {
     ssize_t nleft = n;
     ssize_t nread;
@@ -72,7 +72,7 @@ ssize_t RIO::readnb(rio_t *rp, void *usrbuf, size_t n)
     return (n - nleft);
 }
 
-ssize_t RIO::rRead(rio_t *rp, void *usrbuf, size_t n)
+ssize_t Rio::rRead(rio_t *rp, void *usrbuf, size_t n)
 {
     int cnt;
     while(rp->rio_cnt <= 0) {

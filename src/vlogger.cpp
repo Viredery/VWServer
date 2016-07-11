@@ -180,4 +180,3 @@ void VLogger::controlLogSystemSize(std::string path) {
 
 
 }  // namespace VWServer
-int main(){}

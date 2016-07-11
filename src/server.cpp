@@ -102,7 +102,7 @@ void Server::run() {
 		    event.events = EPOLLIN | EPOLLET;
 		    if(epoll_ctl(epollfd, EPOLL_CTL_ADD, connfd, &event) < 0)
 		        //need to change[should not exit]
-			server_error_info("Failed to create epollfd");
+			    server_error_info("Failed to create epollfd");
 		}
 	    } else {
 	        //deal with client requests

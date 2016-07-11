@@ -55,7 +55,7 @@ void ThreadPool::runThread() {
         Task *task = taskQueue.front();
         taskQueue.pop();
         pthread_mutex_unlock(&taskMutex);
-    
+
         pthread_mutex_lock(&threadMoveMutex);
         idle2Busy(sefPid);
         pthread_mutex_unlock(&threadMoveMutex);

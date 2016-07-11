@@ -22,7 +22,7 @@ public:
  * 这里使用的带缓冲rio输入函数是线程安全的
  * 使用rio_readlineb和rio_readnb前应先调用rio_readinitb函数
  */
-class RIO {
+class Rio {
 public:
     /**
      * 从位置usrbuf传送n个字节到描述符fd。绝不会返回不足值
