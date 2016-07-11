@@ -1,8 +1,15 @@
+#pragma once
+
 #ifndef _TASK_H
 #define _TASK_H
 
+#include "method_handler.h"
+#include <memory>
+#include <list>
 #include <string>
-#include "methodhandler.h"
+
+namespace VWServer
+{
 
 class Task {
 public:
@@ -13,8 +20,11 @@ private:
     enum { REQUEST_MAX_SIZE = 1024 };
     int connfd;
     void doit();
-    void parse_uri(std::string &uri, std::string &cgiargs);
-    Method_handler *method_class_factory(std::string &method, std::string &uri, std::string &version, std::string &cgiargs, std::string &post_content);
+    std::string parseUri(std::string& uri);
+    void parseHeader(std::list<std::string>& headerList);
+    void parsePostContent(std::string& postContent);
 };
+
+}
 
 #endif

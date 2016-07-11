@@ -1,7 +1,11 @@
 #include "task.h"
-#include "rio_web.h"
+#include "rio.h"
+#include "vlogger.h"
 #include <cstring>
-using namespace std;
+#include <utility>
+
+namespace VWServer
+{
 
 Task::Task(int fd) {
     connfd = fd;
@@ -15,62 +19,74 @@ void Task::run() {
 }
 
 void Task::doit() {
-    int is_static;
     rio_t rio;
     char buf[REQUEST_MAX_SIZE];
-    rio_readinitb(&rio, connfd);
-    if(rio_readlineb(&rio, buf, REQUEST_MAX_SIZE) < 0) {
-        //send error info
-	return;
+    Rio::readinitb(&rio, connfd);
+    //parse request line
+    if(Rio::readlineb(&rio, buf, REQUEST_MAX_SIZE) < 0) {
+        VLogger::getInstance()->error("Failed to recv the request line.");
+	    return;
     }
-    string request_line(buf, buf + strlen(buf));
-    if(request_line.compare("\r\n") == 0) {
-        //send error info
-	return;
+    std::string requestLine(buf, buf + strlen(buf));
+    if(requestLine.compare("\r\n") == 0) {
+        VLogger::getInstance()->error("Request line is empty.");
+	    return;
     }
-    string::size_type first_space = request_line.find(' ', 0);
-    string::size_type second_space = request_line.find(' ', first_space + 1);
-    string method(request_line, 0, first_space);
-    string uri(request_line, first_space + 1, second_space - first_space - 1);
-    string version(request_line, second_space + 1, request_line.size() - second_space - 3);
+    std::string::size_type firstSpace = requestLine.find(' ', 0);
+    std::string::size_type secondSpace = requestLine.find(' ', firstSpace + 1);
+    if (std::string::npos == firstSpace || std::string::npos == secondSpace) {
+        VLogger::getInstance()->error("A formal error occurs in the request line.");
+        return;
+    }
+    std::string method(requestLine, 0, firstSpace);
+    std::string uri(requestLine, firstSpace + 1, secondSpace - firstSpace - 1);
+    std::string version(requestLine, secondSpace + 1, requestLine.size() - secondSpace - 3);
     //be sure whether this is a cgi request
-    string cgiargs;
-    parse_uri(uri, cgiargs);
-    //be sure whether this is a post request
-    string post_content;
-    /*
-     *
-     * save post content
-     * not finish
-     *
-     *
-     */
-    Method_handler *m = method_class_factory(method, uri, version, cgiargs, post_content);
-    m->handle();
-    delete m;
-}
-
-void Task::parse_uri(string &uri, string &cgiargs) {
-    string::size_type pos = uri.find('?');
-    string::size_type amount = uri.size();
-    if(pos != string::npos) {
-        cgiargs.append(uri, pos + 1, amount - pos - 1);
-	uri.erase(pos, amount - pos);
-    } else {
-        if(uri[amount - 1] == '/')
-	    uri.append("index.html");
+    std::string cgiargs = parseUri(uri);
+    int lineLength = 0;
+    //parse header content
+    std::list<std::string> headerlist;
+    while ((lineLength = Rio::readlineb(&rio, buf, REQUEST_MAX_SIZE)) > 0 && strcasecmp(buf, "\r\n") != 0) {
+        std::string header(buf, lineLength - 2);
+        headerlist.push_back(header);
     }
+    parseHeader(headerlist);
+    //be sure whether this is a post request
+    std::string postContent;
+    while ((lineLength = Rio::readlineb(&rio, buf, REQUEST_MAX_SIZE)) > 0) {
+        postContent.append(buf, lineLength);
+    }
+    parsePostContent(postContent);
+
+    //deal with request
+    std::unique_ptr<MethodHandler> ptrHandler = MethodHandler::methodClassFactory(method, uri, version, cgiargs, postContent);
+    if (ptrHandler.get()) {
+        ptrHandler->handle();
+        //release memory
+        ptrHandler.reset();
+    }
+    
 }
 
-Method_handler *Task::method_class_factory(string &method, string &uri, string &version, string &cgiargs, string &post_content) {
-    Method_handler *m;
-    if(method.compare("GET") == 0 || method.compare("get") == 0) {
-        if(!cgiargs.empty())
-	    m = new Get_dynamic_handler(method, uri, cgiargs);
-	else
-	    m = new Get_static_handler(method, uri);
-    } else if(method.compare("POST") == 0 || method.compare("post") == 0)
-        m = new Post_handler(method, uri, post_content);
-    else
-        m = new Nothing_to_do_handler();
+std::string Task::parseUri(std::string& uri) {
+    std::string::size_type pos = uri.find('?');
+    std::string::size_type length = uri.size();
+    std::string cgiargs;
+    if(pos != std::string::npos) {
+        cgiargs = uri.substr(pos + 1, length - pos - 1);
+	    uri.erase(pos, length - pos);
+    }
+    return cgiargs;
 }
+
+void Task::parseHeader(std::list<std::string>& headerList) {
+    //EXTEND in the future
+}
+
+void Task::parsePostContent(std::string& postContent) {
+    //EXTEND in the future
+}
+
+}
+int main()
+{}
